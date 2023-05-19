@@ -1,26 +1,20 @@
-FROM python:3.9
+# base ubuntu 18.04 image
+FROM ubuntu:bionic
 
-# Copy the application code into the container
-COPY . /app/
+## system-wide dependencies
+RUN apt-get update && \
+DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+build-essential git ffmpeg bc \
+python3 python3-dev python3-pip python3-setuptools python3-wheel
 
-# Set the working directory
-WORKDIR /app
+# install video-server app
+WORKDIR /opt/video-server-app
+COPY ./ /opt/video-server-app
+RUN pip3 install --upgrade pip
+RUN pip3 install honcho==1.0.1
+RUN pip3 install gunicorn==19.7.1
+RUN pip3 install -e video-server/[dev]
 
-
-# Install ffmpeg
-RUN apt-get update && apt-get install -y ffmpeg
-
-
-# Install MongoDB
-RUN apt-get install -y gnupg && \
-    wget -qO - https://www.mongodb.org/static/pgp/server-5.0.asc | apt-key add - && \
-    echo "deb [ arch=amd64,arm64 ] https://repo.mongodb.org/apt/ubuntu focal/mongodb-org/5.0 multiverse" | tee /etc/apt/sources.list.d/mongodb-org-5.0.list && \
-    apt-get update && apt-get install -y mongodb-org && \
-    rm -rf /var/lib/apt/lists/*
-
-# Install the package in editable mode
-RUN pip install -e .
-
-# Start the application
-CMD ["python", "-m", "videoserver.app"]
-
+# run
+ENTRYPOINT ["honcho"]
+CMD ["start"]
