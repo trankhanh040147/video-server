@@ -18,11 +18,9 @@ RUN apt-get install -y gnupg && \
     apt-get update && apt-get install -y mongodb-org && \
     rm -rf /var/lib/apt/lists/*
 
-# FROM rabbitmq:3.8-management
-# RUN rabbitmq-plugins enable --offline rabbitmq_mqtt rabbitmq_federation_management rabbitmq_stomp
-
 # Install the package in editable mode
 RUN pip install -e .
 
 # Start the application
 CMD ["python", "-m", "videoserver.app"]
+
