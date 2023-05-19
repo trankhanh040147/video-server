@@ -6,6 +6,11 @@ services:
     environment:
       - RABBITMQ_DEFAULT_USER=guest
       - RABBITMQ_DEFAULT_PASS=guest
+  mongodb:
+    image: mongo:3
+    container_name: video-server-mongodb
+    volumes:
+      - mongodb_data:/data/db
   server:
     build: .
     container_name: video-server
