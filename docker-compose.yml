@@ -1,0 +1,23 @@
+version: '3'
+services:
+  server:
+    build: .
+    container_name: video-server
+    ports:
+      - "5050:5050"
+    depends_on:
+      - rabbit
+      - mongodb
+    links:
+      - rabbit
+      - mongodb
+    environment:
+      - MEDIA_STORAGE=filesystem
+      - FS_MEDIA_STORAGE_PATH=/opt/media
+      - RABBIT_MQ_URL=pyamqp://guest@rabbit//
+      - MONGO_HOST=mongodb
+    volumes:
+      - D:\video-server\video-server\src\videoserver\media\projects:/opt/media
+volumes:
+  mongodb_data: {}
+  server_data: {}
