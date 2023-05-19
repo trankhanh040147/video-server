@@ -3,10 +3,10 @@ import logging
 import os
 import re
 from datetime import datetime
-
+import subprocess
 import bson
 from flask import current_app as app
-from flask import request
+from flask import request,Response
 from pymongo import ReturnDocument
 from pymongo.errors import ServerSelectionTimeoutError
 from werkzeug.exceptions import BadRequest, Conflict, InternalServerError, NotFound
@@ -1334,7 +1334,80 @@ class GetRawTimelineThumbnail(MethodView):
             headers={'Content-Type': thumbnail['mimetype']}
         )
 
+class ChangeVideoResolution(MethodView):
+    
+    def post(self, project_id):
+        """
+        Change Video(mp4) Resolution format
+        ---
+        parameters:
+            - name: project_id
+              in: path
+              type: string
+              required: true
+              description: Unique project id
+            - name: resolution
+              in: query
+              type: string
+              required: true
+              description: select video resolution
+        responses:
+          200:
+            description: Video converted successfully
+            content:
+              video/x-msvideo:
+                schema:
+                  type: string
+                  format: binary
+                  example: "JVBERi0xLjQKJeLjz9MKMSAwIG9iaiA8PC9UeXBlL0ZvbnQvQmFzZUZvbnQvTGVuZ3RoIDEwIDAgUj4+CnN0... (binary data)"
+          404:
+            description: Project not found
+          409:
+            description: A running task has not completed
+            schema:
+              type: object
+              properties:
+                processing:
+                  type: array
+                  example:
+                    - Some tasks is still processing
+        """
 
+        project = app.mongo.db.projects.find_one({'_id': bson.ObjectId(project_id)})
+        if not project:
+            raise NotFound("Project not found")
+
+        # check project is processing
+        if any(project['processing'].values()):
+            raise Conflict({"processing": ["Some tasks are still processing"]})
+        video_resolution = request.args.get('resolution', type=float)
+
+        # Update processing status
+        app.mongo.db.projects.update_one({'_id': project['_id']}, {'$set': {'processing.video': True}})
+
+        try:
+            # Get video file path
+            video_path = 'video-server/src/videoserver/media/projects/' + self.project['storage_id']
+            # new video
+            newVideo_path = video_path.replace('.mp4', '.mp4')
+            subprocess.call(['ffmpeg', '-i', video_path, '-filter:v', f'scale={video_resolution}', '-c:a', 'copy', newVideo_path])
+
+            # save new video
+            with open(newVideo_path, 'rb') as f:
+                content = f.read()
+      
+            app.mongo.db.projects.update_one({'_id': project['_id']}, {'$set': {'processing.video': False}})
+
+            # return new video
+            response = Response(content_type='video/x-msvideo')
+            response.headers['Content-Disposition'] = f'attachment; filename={project["filename"].replace(".mp4", ".mp4")}'
+            response.set_data(content)
+            return response
+
+        except Exception as e:
+            # Update processing status and re-raise exception
+            app.mongo.db.projects.update_one({'_id': project['_id']}, {'$set': {'processing.video': False}})
+            raise InternalServerError(str(e))
 # register all urls
 bp.add_url_rule(
     '/',
@@ -1363,4 +1436,8 @@ bp.add_url_rule(
 bp.add_url_rule(
     '/<project_id>/raw/thumbnails/timeline/<int:index>',
     view_func=GetRawTimelineThumbnail.as_view('get_raw_timeline_thumbnail')
+)
+bp.add_url_rule(
+    '/<project_id>/change_video(mp4)_resolution',
+    view_func=ChangeVideoResolution.as_view('change_video(mp4)_resolution')
 )
