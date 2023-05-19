@@ -1445,6 +1445,14 @@ class ChangeSpeed(MethodView):
                                 example:
                                     - Some tasks is still processing
             """
+             # Check if project exists
+            project = app.mongo.db.projects.find_one({'_id': bson.ObjectId(project_id)})
+            if not project:
+                raise NotFound("Project not found")
+
+            # Check if a task is already processing
+            if any(project['processing'].values()):
+                raise Conflict({"processing": ["Some tasks are still processing"]})
 
 # register all urls
 bp.add_url_rule(
