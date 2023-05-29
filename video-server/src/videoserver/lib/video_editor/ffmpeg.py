@@ -261,9 +261,9 @@ class FFMPEGVideoEditor(VideoEditorInterface):
                 return path_output
             # replace tmp origin 
             # If you run on Linux, use this command
-            # subprocess.run(["cp", "-r", path_output, path_input])
+            subprocess.run(["cp", "-r", path_output, path_input])
             # If you run on Windows, use this command
-            subprocess.run(["copy", path_output, path_input], shell=True)
+            # subprocess.run(["copy", path_output, path_input], shell=True)
             return path_input
         finally:
             if override:
