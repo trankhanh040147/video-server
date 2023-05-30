@@ -1,0 +1,36 @@
+name: CI/CD
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - closed
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2 
+
+      - name: Build and push backend image
+        if: github.event.pull_request.merged && startsWith(github.head_ref, 'backend')
+        run: |
+          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/backend:latest .
+          docker login -u ${{ secrets.DOCKERHUB_USERNAME }} -p ${{ secrets.DOCKERHUB_PASSWORD }}
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/backend:latest
+
+      - name: Deploy to Server EC2
+        uses: appleboy/ssh-action@master
+        with:
+          host: ec2-18-204-221-190.compute-1.amazonaws.com
+          username: ubuntu
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            sudo su
+            cd compose
+            docker compose down
+            docker compose pull
+            docker compose up -d
