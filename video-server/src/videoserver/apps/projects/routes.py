@@ -6,7 +6,7 @@ from datetime import datetime
 import subprocess
 import bson
 from flask import current_app as app
-from flask import request,Response
+from flask import request, Response
 from pymongo import ReturnDocument
 from pymongo.errors import ServerSelectionTimeoutError
 from werkzeug.exceptions import BadRequest, Conflict, InternalServerError, NotFound
@@ -1334,8 +1334,9 @@ class GetRawTimelineThumbnail(MethodView):
             headers={'Content-Type': thumbnail['mimetype']}
         )
 
+
 class ChangeVideoResolution(MethodView):
-    
+
     def post(self, project_id):
         """
         Change Video(mp4) Resolution format
@@ -1390,17 +1391,19 @@ class ChangeVideoResolution(MethodView):
             video_path = 'video-server/src/videoserver/media/projects/' + self.project['storage_id']
             # new video
             newVideo_path = video_path.replace('.mp4', '.mp4')
-            subprocess.call(['ffmpeg', '-i', video_path, '-filter:v', f'scale={video_resolution}', '-c:a', 'copy', newVideo_path])
+            subprocess.call(['ffmpeg', '-i', video_path, '-filter:v',
+                            f'scale={video_resolution}', '-c:a', 'copy', newVideo_path])
 
             # save new video
             with open(newVideo_path, 'rb') as f:
                 content = f.read()
-      
+
             app.mongo.db.projects.update_one({'_id': project['_id']}, {'$set': {'processing.video': False}})
 
             # return new video
             response = Response(content_type='video/x-msvideo')
-            response.headers['Content-Disposition'] = f'attachment; filename={project["filename"].replace(".mp4", ".mp4")}'
+            response.headers[
+                'Content-Disposition'] = f'attachment; filename={project["filename"].replace(".mp4", ".mp4")}'
             response.set_data(content)
             return response
 
@@ -1408,51 +1411,93 @@ class ChangeVideoResolution(MethodView):
             # Update processing status and re-raise exception
             app.mongo.db.projects.update_one({'_id': project['_id']}, {'$set': {'processing.video': False}})
             raise InternalServerError(str(e))
+
+
 class ChangeSpeed(MethodView):
     def post(self, project_id):
-            """
-            Change speed of a video
-            ---
-            parameters:
-                - name: project_id
-                  in: path
-                  type: string
-                  required: true
-                  description: Unique project id
-                - name: speed
-                  in: query
-                  type: string
-                  required: true
-                  description: Desired speed for the video, e.g. "2" for double speed or "0.5" for half speed
-            responses:
-                200:
-                    description: Video speed changed successfully
-                    content:
-                        video/mp4:
-                            schema:
-                                type: string
-                                format: binary
-                                example: "JVBERi0xLjQKJeLjz9MKMSAwIG9iaiA8PC9UeXBlL0ZvbnQvQmFzZUZvbnQvTGVuZ3RoIDEwIDAgUj4+CnN0... (binary data)"
-                404:
-                    description: Project not found
-                409:
-                    description: A running task has not completed
-                    schema:
-                        type: object
-                        properties:
-                            processing:
-                                type: array
-                                example:
-                                    - Some tasks is still processing
-            """
-             # Check if project exists
-            project = app.mongo.db.projects.find_one({'_id': bson.ObjectId(project_id)})
-            if not project:
-                raise NotFound("Project not found")
+        """
+        Change speed of a video
+        ---
+        parameters:
+            - name: project_id
+              in: path
+              type: string
+              required: true
+              description: Unique project id
+            - name: speed
+              in: query
+              type: string
+              required: true
+              description: Desired speed for the video, e.g. "2" for double speed or "0.5" for half speed
+        responses:
+            200:
+                description: Video speed changed successfully
+                content:
+                    video/mp4:
+                        schema:
+                            type: string
+                            format: binary
+                            example: "JVBERi0xLjQKJeLjz9MKMSAwIG9iaiA8PC9UeXBlL0ZvbnQvQmFzZUZvbnQvTGVuZ3RoIDEwIDAgUj4+CnN0... (binary data)"
+            404:
+                description: Project not found
+            409:
+                description: A running task has not completed
+                schema:
+                    type: object
+                    properties:
+                        processing:
+                            type: array
+                            example:
+                                - Some tasks is still processing
+        """
 
-            # Check if a task is already processing
-            if any(project['processing'].values()):
-                raise Conflict({"processing": ["Some tasks are still processing"]})
+        # Check if project exists
+        project = app.mongo.db.projects.find_one({'_id': bson.ObjectId(project_id)})
+        if not project:
+            raise NotFound("Project not found")
+
+        # Check if a task is already processing
+        if any(project['processing'].values()):
+            raise Conflict({"processing": ["Some tasks are still processing"]})
+
+        # Get video file path
+        video_path = '/opt/media/' + self.project['storage_id']
+
+        # Get desired speed from query parameters
+        speed = request.args.get('speed', type=float)
+        if not speed:
+            raise InternalServerError('Missing required query parameter "speed"')
+
+        try:
+            # Change speed of video
+            output_path = video_path.replace('.mp4', f'_speed{speed}.mp4')
+            subprocess.call(['ffmpeg', '-i', video_path, '-filter:v',
+                            f'setpts={1/speed}*PTS', '-filter:a', f'atempo={speed}', '-strict', '-2', '-y', output_path])
+            # subprocess.call(['ffmpeg', '-i', video_path, '-vf', f'setpts=(PTS-STARTPTS)/speed', '-af', f'atempo={speed}', output_path])
+            # Save video to storage
+            with open(output_path, 'rb') as f:
+                content = f.read()
+            video_storage_id = app.fs.put(content=content, filename=project['filename'].replace('.mp4', f'_speed{speed}.mp4'),
+                                          project_id=project_id, content_type='video/mp4')
+
+            # Update project with audio storage ID
+            app.mongo.db.projects.update_one({'_id': project['_id']}, {'$set': {'processing.video': False}})
+
+            # app.mongo.db.projects.update_one({'_id': project['_id']},
+            #                                  {'$set': {'storage_id': video_storage_id, 'mime_type': 'video/mp4',
+            #                                            'processing.video': False}})
+
+            # Return video file
+            response = Response(content_type='video/mp4')
+            response.headers[
+                'Content-Disposition'] = f'attachment; filename={project["filename"].replace(".mp4", f"_speed{speed}.mp4")}'
+            response.set_data(content)
+            return response
+        except Exception as e:
+            # Update processing status and re-raise exception
+            app.mongo.db.projects.update_one({'_id': project['_id']}, {'$set': {'processing.video': False}})
+            raise InternalServerError(str(e))
+
 
 # register all urls
 bp.add_url_rule(
