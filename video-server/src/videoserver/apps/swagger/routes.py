@@ -16,3 +16,11 @@ def spec_data():
 @bp.route('/')
 def swag():
     return render_template('index.html')
+
+@bp.route('/auth')
+def auth():
+    return render_template('Auth.html')
+
+@bp.route('/user/video')
+def video():
+    return render_template('VideoPage.html')

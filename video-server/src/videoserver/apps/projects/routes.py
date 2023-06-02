@@ -3,10 +3,10 @@ import logging
 import os
 import re
 from datetime import datetime
+from flask import Response, current_app as app
 import subprocess
 import bson
-from flask import current_app as app
-from flask import request, Response
+from flask import request
 from pymongo import ReturnDocument
 from pymongo.errors import ServerSelectionTimeoutError
 from werkzeug.exceptions import BadRequest, Conflict, InternalServerError, NotFound
@@ -20,6 +20,7 @@ from videoserver.lib.utils import (
 
 from . import bp
 from .tasks import edit_video, generate_preview_thumbnail, generate_timeline_thumbnails
+
 
 logger = logging.getLogger(__name__)
 
@@ -1334,12 +1335,84 @@ class GetRawTimelineThumbnail(MethodView):
             headers={'Content-Type': thumbnail['mimetype']}
         )
 
+class ChangeVideoSpeed(MethodView):
+    def put(self, project_id):
+      """
+      Speed changing
+      ---
+      parameters:
+        - name: project_id
+          in: path
+          type: string
+          required: True
+          description: Unique project id
+        - name: speed
+          in: query
+          type: string
+          required: true
+          description: Desired speed for the video, e.g. "2" for double speed or "0.5" for half speed
+        
+      responses:
+          200:
+              description: Video speed changed successfully
+              content:
+                  video/mp4:
+                      schema:
+                          type: string
+                          format: binary
+                          example: "JVBERi0xLjQKJeLjz9MKMSAwIG9iaiA8PC9UeXBlL0ZvbnQvQmFzZUZvbnQvTGVuZ3RoIDEwIDAgUj4+CnN0... (binary data)"
+          404:
+              description: Project not found
+          409:
+              description: A running task has not completed
+              schema:
+                  type: object
+                  properties:
+                      processing:
+                          type: array
+                          example:
+                              - Task edit video is still processing
+      """
+      project = app.mongo.db.projects.find_one({'_id': bson.ObjectId(project_id)})
+      if not project:
+        raise NotFound("Project not found")
+      if any(project['processing'].values()):
+        raise Conflict({"processing": ["Task edit video is still processing"]})
+      #request_json = request.get_json()
+      # document = validate_document(
+      #     request_json if request_json else {},
+      #     self.schema_edit
+      # )
+      # if not document:
+      #   raise BadRequest({
+      #       'edit': [f"At least one of the edit rules is required."]
+      #   })
+      video_path = '../../video-server/src/videoserver/media/projects/' + project['storage_id']
+      speed = request.args.get('speed', type=float)
+      try:
+          output_path = video_path.replace('.mp4', f'_speed{speed}.mp4')
+          subprocess.call(['ffmpeg', '-i', video_path, '-vf', f'setpts=(PTS-STARTPTS)/{speed}', '-af', f'atempo={speed}', output_path])
+          #subprocess.call(['ffmpeg', '-i', video_path, '-vf', f'setpts=(PTS-STARTPTS)/speed', '-af', f'atempo={speed}', output_path])
+        
+          with open(output_path, 'rb') as f:
+              content = f.read()
+          video_storage_id = app.fs.put(content=content, filename=project['filename'].replace('.mp4', f'_speed{speed}.mp4'),
+                                        project_id=project_id, content_type='video/mp4')
+          app.mongo.db.projects.update_one({'_id': project['_id']}, {'$set': {'processing.video': False}})
+          response = Response(content_type='video/mp4')
+          response.headers['Content-Disposition'] = f'attachment; filename={project["filename"].replace(".mp4", f"_speed{speed}.mp4")}'
+          response.set_data(content)
+          return response
+      except Exception as e:
+            app.mongo.db.projects.update_one({'_id': project['_id']}, {'$set': {'processing.video': False}})
+            raise InternalServerError(str(e))
 
-class ChangeVideoResolution(MethodView):
+
+class ConvertToAudio(MethodView):
 
     def post(self, project_id):
         """
-        Change Video(mp4) Resolution format
+        Convert to audio
         ---
         parameters:
             - name: project_id
@@ -1347,11 +1420,65 @@ class ChangeVideoResolution(MethodView):
               type: string
               required: true
               description: Unique project id
-            - name: resolution
-              in: query
+        responses:
+          200:
+            description: Audio extracted successfully
+            content:
+              audio/mp3:
+                schema:
+                  type: string
+                  format: binary
+          404:
+            description: Project not found
+          409:
+            description: A running task has not completed
+            schema:
+              type: object
+              properties:
+                processing:
+                  type: array
+                  example:
+                    - Some tasks is still processing
+        """
+
+        project = app.mongo.db.projects.find_one({'_id': bson.ObjectId(project_id)})
+        if not project:
+            raise NotFound("Project not found")
+
+        if any(project['processing'].values()):
+            raise Conflict({"processing": ["Some tasks are still processing"]})
+        
+        app.mongo.db.projects.update_one({'_id': project['_id']}, {'$set': {'processing.video': True}})
+
+        try:
+            video_path = '../../video-server/src/videoserver/media/projects/' + self.project['storage_id']
+            audio_path = video_path.replace('.mp4', '.mp3')
+            # ffmpeg -i in.mp4 -q:a 0 -map a out.mp3
+            subprocess.call(['ffmpeg', '-i', video_path, '-q:a', '0', '-map', "a", audio_path])
+            with open(audio_path, 'rb') as f:
+                content = f.read()
+            app.mongo.db.projects.update_one({'_id': project['_id']}, {'$set': {'processing.video': False}})
+            response = Response(content_type='audio/mp3')
+            response.headers['Content-Disposition'] = f'attachment; filename={project["filename"].replace(".mp4", ".mp3")}'
+            response.set_data(content)
+            return response
+
+        except Exception as e:
+            app.mongo.db.projects.update_one({'_id': project['_id']}, {'$set': {'processing.video': False}})
+            raise InternalServerError(str(e))
+        
+class ConvertToMKV(MethodView):
+    
+    def post(self, project_id):
+        """
+        MP4 converter
+        ---
+        parameters:
+            - name: project_id
+              in: path
               type: string
               required: true
-              description: select video resolution
+              description: Unique project id
         responses:
           200:
             description: Video converted successfully
@@ -1371,84 +1498,7 @@ class ChangeVideoResolution(MethodView):
                 processing:
                   type: array
                   example:
-                    - Some tasks is still processing
-        """
-
-        project = app.mongo.db.projects.find_one({'_id': bson.ObjectId(project_id)})
-        if not project:
-            raise NotFound("Project not found")
-
-        # check project is processing
-        if any(project['processing'].values()):
-            raise Conflict({"processing": ["Some tasks are still processing"]})
-        video_resolution = request.args.get('resolution', type=float)
-
-        # Update processing status
-        app.mongo.db.projects.update_one({'_id': project['_id']}, {'$set': {'processing.video': True}})
-
-        try:
-            # Get video file path
-            video_path = 'video-server/src/videoserver/media/projects/' + self.project['storage_id']
-            # new video
-            newVideo_path = video_path.replace('.mp4', '.mp4')
-            subprocess.call(['ffmpeg', '-i', video_path, '-filter:v',
-                            f'scale={video_resolution}', '-c:a', 'copy', newVideo_path])
-
-            # save new video
-            with open(newVideo_path, 'rb') as f:
-                content = f.read()
-
-            app.mongo.db.projects.update_one({'_id': project['_id']}, {'$set': {'processing.video': False}})
-
-            # return new video
-            response = Response(content_type='video/x-msvideo')
-            response.headers[
-                'Content-Disposition'] = f'attachment; filename={project["filename"].replace(".mp4", ".mp4")}'
-            response.set_data(content)
-            return response
-
-        except Exception as e:
-            # Update processing status and re-raise exception
-            app.mongo.db.projects.update_one({'_id': project['_id']}, {'$set': {'processing.video': False}})
-            raise InternalServerError(str(e))
-
-
-class ChangeSpeed(MethodView):
-    def post(self, project_id):
-        """
-        Change speed of a video
-        ---
-        parameters:
-            - name: project_id
-              in: path
-              type: string
-              required: true
-              description: Unique project id
-            - name: speed
-              in: query
-              type: string
-              required: true
-              description: Desired speed for the video, e.g. "2" for double speed or "0.5" for half speed
-        responses:
-            200:
-                description: Video speed changed successfully
-                content:
-                    video/mp4:
-                        schema:
-                            type: string
-                            format: binary
-                            example: "JVBERi0xLjQKJeLjz9MKMSAwIG9iaiA8PC9UeXBlL0ZvbnQvQmFzZUZvbnQvTGVuZ3RoIDEwIDAgUj4+CnN0... (binary data)"
-            404:
-                description: Project not found
-            409:
-                description: A running task has not completed
-                schema:
-                    type: object
-                    properties:
-                        processing:
-                            type: array
-                            example:
-                                - Some tasks is still processing
+                    - Tasks is still processing
         """
 
         # Check if project exists
@@ -1458,46 +1508,227 @@ class ChangeSpeed(MethodView):
 
         # Check if a task is already processing
         if any(project['processing'].values()):
-            raise Conflict({"processing": ["Some tasks are still processing"]})
+            raise Conflict({"processing": ["Tasks are still processing"]})
 
-        # Get video file path
-        video_path = '/opt/media/' + self.project['storage_id']
-
-        # Get desired speed from query parameters
-        speed = request.args.get('speed', type=float)
-        if not speed:
-            raise InternalServerError('Missing required query parameter "speed"')
+        # Update processing status
+        app.mongo.db.projects.update_one({'_id': project['_id']}, {'$set': {'processing.video': True}})
 
         try:
-            # Change speed of video
-            output_path = video_path.replace('.mp4', f'_speed{speed}.mp4')
-            subprocess.call(['ffmpeg', '-i', video_path, '-filter:v',
-                            f'setpts={1/speed}*PTS', '-filter:a', f'atempo={speed}', '-strict', '-2', '-y', output_path])
-            # subprocess.call(['ffmpeg', '-i', video_path, '-vf', f'setpts=(PTS-STARTPTS)/speed', '-af', f'atempo={speed}', output_path])
-            # Save video to storage
-            with open(output_path, 'rb') as f:
-                content = f.read()
-            video_storage_id = app.fs.put(content=content, filename=project['filename'].replace('.mp4', f'_speed{speed}.mp4'),
-                                          project_id=project_id, content_type='video/mp4')
+            # Get video file path
+            video_path = '../../video-server/src/videoserver/media/projects/' + self.project['storage_id']
 
-            # Update project with audio storage ID
+            # Convert video to MKV format
+            MKV_path = video_path.replace('.mp4', '.mkv')
+            subprocess.call(['ffmpeg', '-i', video_path, '-c:v', 'copy', '-c:a', 'copy', MKV_path])
+
+            with open(MKV_path, 'rb') as f:
+                content = f.read()
             app.mongo.db.projects.update_one({'_id': project['_id']}, {'$set': {'processing.video': False}})
 
-            # app.mongo.db.projects.update_one({'_id': project['_id']},
-            #                                  {'$set': {'storage_id': video_storage_id, 'mime_type': 'video/mp4',
-            #                                            'processing.video': False}})
-
-            # Return video file
-            response = Response(content_type='video/mp4')
-            response.headers[
-                'Content-Disposition'] = f'attachment; filename={project["filename"].replace(".mp4", f"_speed{speed}.mp4")}'
+            response = Response(content_type='video/x-msvideo')
+            response.headers['Content-Disposition'] = f'attachment; filename={project["filename"].replace(".mp4", ".mkv")}'
             response.set_data(content)
             return response
+
         except Exception as e:
             # Update processing status and re-raise exception
             app.mongo.db.projects.update_one({'_id': project['_id']}, {'$set': {'processing.video': False}})
             raise InternalServerError(str(e))
+class MergeTwoVideos(MethodView):
+    def post(self, project_id_1, project_id_2):
+        """
+        Merge videos
+        ---
+        parameters:
+          - name: project_id_1
+            in: path
+            type: string
+            required: true
+            description: Unique ID of first project
+          - name: project_id_2
+            in: path
+            type: string
+            required: true
+            description: Unique ID of second project
+        responses:
+          200:
+            description: Videos merged successfully
+            content:
+              video/mp4:
+                schema:
+                  type: string
+                  format: binary
+                  example: "JVBERi0xLjQKJeLjz9MKMSAwIG9iaiA8PC9UeXBlL0ZvbnQvQmFzZUZvbnQvTGVuZ3RoIDEwIDAgUj4+CnN0... (binary data)"
+          404:
+            description: Project not found
+          409:
+            description: A running task has not completed
+            schema:
+              type: object
+              properties:
+                processing:
+                  type: array
+                  example:
+                    - Some tasks is still processing
+        """
 
+        # Check if both projects exist
+        project_1 = app.mongo.db.projects.find_one({'_id': bson.ObjectId(project_id_1)})
+        project_2 = app.mongo.db.projects.find_one({'_id': bson.ObjectId(project_id_2)})
+        if not project_1 or not project_2:
+            raise NotFound("Project not found")
+
+        # Check if a task is already processing
+        if any(project_1['processing'].values()) or any(project_2['processing'].values()):
+            raise Conflict({"processing": ["Some tasks are still processing"]})
+
+        # Update processing status for both projects
+        app.mongo.db.projects.update_one({'_id': project_1['_id']}, {'$set': {'processing.video': True}})
+        app.mongo.db.projects.update_one({'_id': project_2['_id']}, {'$set': {'processing.video': True}})
+
+        try:
+          # Get video file paths
+          video_path_1 = '../../video-server/src/videoserver/media/projects/' + project_1['storage_id']
+          video_path_2 = '../../video-server/src/videoserver/media/projects/' + project_2['storage_id']
+
+          # Merge videos
+          merged_path = "videoserver/media/projects/merged.mp4"
+          subprocess.call(['ffmpeg', '-i', video_path_1, '-i', video_path_2, '-filter_complex', '[0:v] [0:a] [1:v] [1:a] concat=n=2:v=1:a=1 [v] [a]', '-map', '[v]', '-map', '[a]', '-ac', '2', merged_path])
+          #subprocess.call(['ffmpeg', '-i', video_path_1, '-i', video_path_2, '-filter_complex', 'concat=n=2:v=1:a=0', '-c:v', 'libx264', '-crf', '23', '-preset', 'veryfast', '-c:a', 'copy', merged_path])
+
+          app.mongo.db.projects.update_one({'_id': project_1['_id']}, {'$set': {'processing.video': False}})
+          app.mongo.db.projects.update_one({'_id': project_2['_id']}, {'$set': {'processing.video': False}})
+          # Return merged video
+          with open(merged_path, 'rb') as f:
+              content = f.read()
+          response = Response(content_type='video/mp4')
+          response.headers['Content-Disposition'] = f'attachment; filename=merged.mp4'
+          response.set_data(content)
+          return response
+        
+        except Exception as e:
+          raise InternalServerError(str(e))
+
+
+class Login(MethodView):
+  def get(self, username, password):
+      """
+      Login access
+      ---
+      parameters:
+        - name: username
+          in: path
+          type: string
+          required: true
+        - name: password
+          in: path
+          type: string
+          required: true
+      responses:
+        200:
+          description: Login successful
+          schema:
+            type: object
+            properties:
+              username:
+                type: string
+                example: "phuc0201"
+              fullname:
+                type: string
+                example: "Trịnh Hoàng Phúc"
+        404:
+          description: Login fail
+        409:
+          description: A running task has not completed
+          schema:
+            type: object
+            properties:
+              processing:
+                type: array
+                example:
+                  - tasks is still processing
+      """      
+      try:
+          for acc in app.mongo.db.account.find({},{ "username": 1,"fullname":1, "password": 1 }):
+            if(username == acc['username'] and password == acc['password']):
+              return json_response({
+                  "message": "Login successful",
+                  "user": {
+                      "username": username,
+                      "fullname": acc['fullname']
+                  }
+              })
+          return json_response({
+            "message": "Login Failed",
+          })
+      except ServerSelectionTimeoutError as e:
+          raise InternalServerError(str(e))
+class SignUp(MethodView):
+  def post(self, username, fullname, password):
+      """
+      Register (Sign up)
+      ---
+      parameters:
+        - name: username
+          in: path
+          type: string
+          required: true
+        - name: fullname
+          in: path
+          type: string
+          required: true
+        - name: password
+          in: path
+          type: string
+          required: true
+      responses:
+        200:
+          description: SignUp successful
+          schema:
+            type: object
+            properties:
+              username:
+                type: string
+                example: "phuc0201"
+              fullname:
+                type: string
+                example: "Trịnh Hoàng Phúc"
+        404:
+          description: SignUp fail
+        409:
+          description: A running task has not completed
+          schema:
+            type: object
+            properties:
+              processing:
+                type: array
+                example:
+                  - tasks is still processing
+      """           
+      account = {
+          "username": username.replace(" ", ""),
+          "fullname": fullname.strip(),
+          "password": password.strip()
+      }
+
+      try:
+          if(username.replace(" ", "")!="" and fullname.strip()!="" 
+             and len(password.strip()) >= 8 and re.search(r"([a-z]+[0-9]+)", password)):
+              for acc in app.mongo.db.account.find({},{ "username": 1}):
+                if(username == acc['username']):
+                  return json_response({
+                    "message": "SignUp Failed - This username is already in use",
+                  })
+              app.mongo.db.account.insert_one(account)
+              return json_response({
+                "message": "SignUp successful",  
+              })
+          return json_response({
+            "message": "SignUp Fail",
+          })
+      except ServerSelectionTimeoutError as e:
+          raise InternalServerError(str(e))
+    
 
 # register all urls
 bp.add_url_rule(
@@ -1507,6 +1738,22 @@ bp.add_url_rule(
 bp.add_url_rule(
     '/<project_id>',
     view_func=RetrieveEditDestroyProject.as_view('retrieve_edit_destroy_project')
+)
+bp.add_url_rule(
+    '/<project_id>/changespeed',
+    view_func=ChangeVideoSpeed.as_view('speedup')
+)
+bp.add_url_rule(
+    '/<project_id_1>/<project_id_2>/merge_videos',
+    view_func=MergeTwoVideos.as_view('merge_videos')
+)
+bp.add_url_rule(
+    '/<project_id>/convert/audio',
+    view_func=ConvertToAudio.as_view('Convert to audio')
+)
+bp.add_url_rule(
+    '/<project_id>/convert/mkv',
+    view_func=ConvertToMKV.as_view("mp4 to mkv")
 )
 bp.add_url_rule(
     '/<project_id>/duplicate',
@@ -1528,11 +1775,12 @@ bp.add_url_rule(
     '/<project_id>/raw/thumbnails/timeline/<int:index>',
     view_func=GetRawTimelineThumbnail.as_view('get_raw_timeline_thumbnail')
 )
+
 bp.add_url_rule(
-    '/<project_id>/change_video(mp4)_resolution',
-    view_func=ChangeVideoResolution.as_view('change_video(mp4)_resolution')
+    'auth/<username>/<password>',
+    view_func=Login.as_view('login')
 )
 bp.add_url_rule(
-    '/<project_id>/change_speed_video',
-    view_func=ChangeSpeed.as_view('change_speed_video')
+    'auth/<username>/<fullname>/<password>',
+    view_func=SignUp.as_view('signup')
 )

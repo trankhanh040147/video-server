@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>List video</title>
+</head>
+<body>
+    <style>
+        #webbody{
+            width: 100%;
+            height: 100%;
+            display: flex;
+        }
+        #video_wrap{
+            max-width: 1400px;
+            margin: 0 auto;
+            display: flex;
+            flex-wrap: wrap;
+        }
+        .title{
+            width: 100%;
+            display: flex;
+        }
+        h1{
+            margin: 0 auto;
+        }
+        video{
+            margin: 10px 10px 0px 10px;
+        }
+    </style>
+    <div class="title">
+        <h1>VIDEO SERVER</h1>
+    </div>
+    <div id="webbody">
+        <div id="video_wrap"></div>
+    </div>
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.4/jquery.min.js"></script>
+    <script>
+        function getCookie(cname) {
+        let name = cname + "=";
+        let decodedCookie = decodeURIComponent(document.cookie);
+        let ca = decodedCookie.split(';');
+        for(let i = 0; i < ca.length; i++) {
+          let c = ca[i];
+          while (c.charAt(0) == ' ') {
+            c = c.substring(1);
+          }
+          if (c.indexOf(name) == 0) {
+            return c.substring(name.length, c.length);
+          }
+        }
+        return "";
+      }
+      if(getCookie("username")==""){
+        location.replace("/swagger/auth")
+      }
+      else{
+        $.ajax({
+            url: `http://127.0.0.1:5050/projects/?page=1`,
+            type: "GET",
+            success: function (data) {
+            if(data){
+                for(let index = 0; index < data["_items"].length; index++){
+                    const video = document.createElement('video');
+                    video.src = data["_items"][index]["url"];
+                    video.autoplay = false;
+                    video.controls = true;
+                    video.muted = false;
+                    video.height = 240;
+                    video.width = 320;
+                    const box = document.getElementById('video_wrap');
+                    box.appendChild(video); 
+                }
+            }
+            }
+        });
+        }
+
+    </script>
+</body>
+</html>

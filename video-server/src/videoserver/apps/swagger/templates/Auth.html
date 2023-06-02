@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <!-- Required meta tags -->
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.1/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-+0n0xVW2eSR5OomGNYDnhzAbDsOXxcvSN1TPprVMTNDbiYZCxYbOOl7+AMvyTG2x" crossorigin="anonymous">
+
+    <title>My App</title>
+
+  </head>
+  <body class="text-center">
+    <style>
+        html,
+        body {
+            height: 100%;
+        }
+
+        body {
+            padding-top: 5rem;
+            background-color: #f5f5f5;
+        }
+
+        .form-signin,
+        .form-signup {
+          max-width: 25rem;
+          margin: auto;
+        }
+    </style>
+    <main class="form-signin">
+      <div>
+        <h1 class="h3 mb-3 fw-normal">Login</h1>
+    
+        <div class="form-floating">
+          <input type="text" class="form-control" id="username" placeholder="phuc">
+          <label for="floatingInput">Username</label>
+        </div>
+        <div class="form-floating">
+          <input type="password" class="form-control" id="password" placeholder="1234567..." style="margin-top: 10px;">
+          <label for="floatingPassword">Password</label>
+        </div>
+
+        <button class="w-100 btn btn-lg btn-primary mt-3" onclick="login()">Login</button>
+        <button class="w-100 btn btn-lg mt-3" onclick="SignupPage()" style="background-color: crimson; color: #f5f5f5;">Signup</button>
+      </div>
+    </main>
+    <main class="form-signup">
+      <div>
+        <h1 class="h3 mb-3 fw-normal">Signup</h1>
+    
+        <div class="form-floating">
+          <input type="text" class="form-control" id="username" placeholder="phuc">
+          <label for="floatingInput">Username</label>
+        </div>
+        <div class="form-floating">
+          <input type="text" class="form-control" id="fullname" placeholder="phuc" style="margin-top: 10px;">
+          <label for="floatingInput">Fullname</label>
+        </div>
+        <div class="form-floating">
+          <input type="password" class="form-control" id="password" placeholder="1234567..." style="margin-top: 10px;">
+          <label for="floatingPassword">Password</label>
+        </div>
+        <button class="w-100 btn btn-lg mt-3" onclick="Signup()" style="background-color: crimson; color: #f5f5f5;">Signup</button>
+        <button class="w-100 btn btn-lg btn-primary mt-3" onclick="loginPage()">Login</button>
+      </div>
+    </main>
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.4/jquery.min.js"></script>
+    <script>
+      document.querySelector(".form-signup").style.display = "none"
+      function setCookie(cname, cvalue, exdays) {
+        const d = new Date();
+        d.setTime(d.getTime() + (exdays*24*60*60*1000));
+        let expires = "expires="+ d.toUTCString();
+        document.cookie = cname + "=" + cvalue + ";" + expires + ";path=/";
+      }
+      function getCookie(cname) {
+        let name = cname + "=";
+        let decodedCookie = decodeURIComponent(document.cookie);
+        let ca = decodedCookie.split(';');
+        for(let i = 0; i < ca.length; i++) {
+          let c = ca[i];
+          while (c.charAt(0) == ' ') {
+            c = c.substring(1);
+          }
+          if (c.indexOf(name) == 0) {
+            return c.substring(name.length, c.length);
+          }
+        }
+        return "";
+      }
+      if(getCookie("username")!=""){
+        location.replace("/swagger")
+      }
+      function login(){
+          let username = document.querySelector(".form-signin #username").value
+          let password = document.querySelector(".form-signin #password").value
+          console.log(username)
+          $.ajax({
+            url: `http://localhost:5050/projects/auth/${username}/${password}`,
+            type: "GET",
+            success: function (data) {
+              if(data['user']){
+                  setCookie("username", "phuc", 1)
+                  location.replace("/swagger")
+              }
+            }
+          });
+      }
+      function SignupPage(){
+        document.querySelector(".form-signup").style.display = "block"
+        document.querySelector(".form-signin").style.display = "none"
+      }
+      function loginPage(){
+        document.querySelector(".form-signup").style.display = "none"
+        document.querySelector(".form-signin").style.display = "block"
+      }
+      function Signup(){
+        let username = document.querySelector(".form-signup #username").value
+        let fullname = document.querySelector(".form-signup #fullname").value
+        let password = document.querySelector(".form-signup #password").value
+        console.log(username)
+        $.ajax({
+          url: `http://localhost:5050/projects/auth/${username}/${fullname}/${password}`,
+          type: "POST",
+          success: function (data) {
+            loginPage()
+          }
+        });
+      }
+    </script> 
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.4/jquery.min.js"></script>
+   
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11.0.16/dist/sweetalert2.all.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.1/dist/js/bootstrap.bundle.min.js" integrity="sha384-gtEjrD/SeCtmISkJkNUaaKMoLD0//ElJ19smozuHV6z3Iehds+3Ulb9Bn9Plx0x4" crossorigin="anonymous"></script>
+  </body>
+</html>
